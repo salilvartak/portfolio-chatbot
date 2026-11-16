@@ -42,6 +42,38 @@ visitor question ─► /chat ─► LangGraph: retrieve (vector search) ─► 
 
 The free plan sleeps when idle, so the first request after a quiet spell takes a while to start.
 
+## Call booking (Google Calendar)
+
+Visitors ask the bot for a call; the agent checks your calendar (read-only tool) and shows open times as
+buttons. The visitor picks one and fills in a short form, which creates a **[Pending]** event on your calendar
+and emails you a review link. **Approve** sends the visitor a calendar invite with a Google Meet link;
+**Decline** removes the event and emails them a polite note. The model never books anything itself.
+
+Rules (all overridable with env vars, see `.env.example`): 30-minute calls; weekdays 7 PM-midnight, weekends
+10 AM-2 PM and 7 PM-midnight (Asia/Kolkata); 12 h minimum notice; 14 days ahead; 15 min buffer; max 3 a day;
+one open request per email; 5 booking attempts per hour per IP.
+
+### One-time setup (all in the browser)
+
+1. **Enable the APIs** in Google Cloud project `portfolio-bot-73fd4`:
+   [Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) and
+   [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com) → *Enable*.
+2. **OAuth consent screen** (Google Auth Platform → Branding / Audience): user type *External*, app name
+   e.g. "Portfolio bot", your email as support + developer contact. Under **Audience**, click
+   **Publish app** (In production). In "Testing" mode, refresh tokens expire after 7 days.
+3. **Create an OAuth client** (Google Auth Platform → Clients → Create client): type *Web application*,
+   authorized redirect URI `https://developers.google.com/oauthplayground`. Copy the client ID and secret.
+4. **Get a refresh token** at [OAuth 2.0 Playground](https://developers.google.com/oauthplayground):
+   - Gear icon → tick *Use your own OAuth credentials* → paste the client ID and secret.
+   - In "Input your own scopes" paste:
+     `https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy https://www.googleapis.com/auth/gmail.send`
+   - *Authorize APIs* → sign in with the Google account whose calendar should take bookings. Google warns the
+     app is unverified: *Advanced* → *Go to Portfolio bot (unsafe)* → allow. (It's your own app.)
+   - *Exchange authorization code for tokens* → copy the **Refresh token**.
+5. **Render → Environment:** set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+   `GOOGLE_OAUTH_REFRESH_TOKEN`. Make sure `CONTACT_EMAIL` (or `NOTIFY_EMAIL`) is set: that's where review
+   emails go. Save; Render redeploys and booking turns on.
+
 ## Run locally (optional)
 
 ```bash

@@ -107,7 +107,7 @@ def test_content_files_chunk_cleanly():
 def test_prompt_includes_contact_and_site():
     from app.prompts import SYSTEM_PROMPT
 
-    out = SYSTEM_PROMPT.format(owner="Salil", site="https://vartak.online", contact="me@x.dev", context="c")
+    out = SYSTEM_PROMPT.format(owner="Salil", site="https://vartak.online", contact="me@x.dev", scheduling="", context="c")
     assert "me@x.dev" in out and "https://vartak.online" in out
 
 

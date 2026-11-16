@@ -39,6 +39,27 @@ class Settings(BaseSettings):
     site_url: str = "https://vartak.online"  # used in the prompt and for blog-post links in citations
     contact_email: str = ""  # where the bot sends visitors when it can't answer
 
+    # Call booking (Google Calendar). Booking is disabled until the three OAuth values are set.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_refresh_token: str = ""
+    calendar_id: str = "primary"
+    owner_timezone: str = "Asia/Kolkata"
+    booking_hours: str = "mon-fri 19:00-24:00; sat-sun 10:00-14:00, 19:00-24:00"
+    slot_minutes: int = 30
+    buffer_minutes: int = 15
+    min_notice_hours: int = 12
+    booking_days_ahead: int = 14
+    max_bookings_per_day: int = 3
+    notify_email: str = ""  # who gets "new call request" emails; defaults to contact_email
+    # Public URL of this API, for the review links in emails. Render sets RENDER_EXTERNAL_URL itself.
+    public_api_url: str = ""
+    render_external_url: str = ""
+
+    @property
+    def api_url(self) -> str:
+        return (self.public_api_url or self.render_external_url or "http://localhost:8000").rstrip("/")
+
     @property
     def origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
