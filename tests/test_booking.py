@@ -228,3 +228,80 @@ def test_agent_offers_slots():
     assert ("slots", [{"start": "2026-11-17T14:30:00+00:00", "label": "Tue 17 Nov, 8:00 PM IST"}]) in events
     assert "".join(d for e, d in events if e == "token") == "Here are some open times. Pick one below."
     assert events[-1] == ("done", None)
+
+
+# ── Apps Script transport ────────────────────────────────────────────────────
+def test_apps_script_transport_follows_redirect_and_checks_errors():
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from app.calendar_api import AppsScriptTransport, GoogleCalendar
+
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):  # like Apps Script: accept POST, redirect to the result
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen["post"] = body
+            self.send_response(302)
+            self.send_header("Location", f"/result?op={body['op']}&ok={int(body['secret'] == 's3cret')}")
+            self.end_headers()
+
+        def do_GET(self):
+            ok = "ok=1" in self.path
+            if not ok:
+                out = {"error": "unauthorized"}
+            elif "op=list" in self.path:
+                out = {"result": {"items": [
+                    {"id": "a", "status": "confirmed", "start": {"dateTime": "2026-11-17T19:00:00+05:30"},
+                     "end": {"dateTime": "2026-11-17T19:30:00+05:30"},
+                     "extendedProperties": {"private": {"source": "portfolio-bot", "visitor_email": "ada@x.dev",
+                                                        "visitor_name": "Ada", "state": "pending"}}},
+                    {"id": "b", "status": "confirmed", "start": {"dateTime": "2026-11-18T19:00:00+05:30"},
+                     "end": {"dateTime": "2026-11-18T19:30:00+05:30"},
+                     "extendedProperties": {"private": {"source": "portfolio-bot", "visitor_email": "bob@x.dev"}}},
+                ]}}
+            else:
+                out = {"result": {"calendars": {"primary": {"busy": [
+                    {"start": "2026-11-17T14:00:00Z", "end": "2026-11-17T15:00:00Z"}]}}}}
+            data = json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_port}/exec"
+    try:
+        cal = GoogleCalendar(AppsScriptTransport(url, "s3cret"))
+        busy = cal.busy(NOW, NOW + timedelta(days=2))
+        assert busy == [(datetime(2026, 11, 17, 14, tzinfo=timezone.utc), datetime(2026, 11, 17, 15, tzinfo=timezone.utc))]
+        assert seen["post"]["op"] == "freebusy" and seen["post"]["secret"] == "s3cret"
+        assert [b.id for b in cal.bookings(NOW, NOW + timedelta(days=3))] == ["a", "b"]
+        assert [b.name for b in cal.bookings(NOW, NOW + timedelta(days=3), email="ADA@x.dev")] == ["Ada"]
+        with pytest.raises(RuntimeError, match="unauthorized"):
+            GoogleCalendar(AppsScriptTransport(url, "wrong")).busy(NOW, NOW)
+    finally:
+        srv.shutdown()
+
+
+def test_get_calendar_prefers_apps_script(monkeypatch):
+    from app import calendar_api
+
+    s = calendar_api.get_settings()
+    calendar_api.get_calendar.cache_clear()
+    monkeypatch.setattr(s, "admin_token", "t")
+    monkeypatch.setattr(s, "apps_script_url", "https://script.google.com/macros/s/x/exec")
+    monkeypatch.setattr(s, "apps_script_secret", "s")
+    try:
+        cal = calendar_api.get_calendar()
+        assert isinstance(cal._call, calendar_api.AppsScriptTransport)
+        calendar_api.get_calendar.cache_clear()
+        monkeypatch.setattr(s, "apps_script_secret", "")
+        assert calendar_api.get_calendar() is None  # no OAuth values either
+    finally:
+        calendar_api.get_calendar.cache_clear()

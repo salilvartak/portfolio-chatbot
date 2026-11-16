@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     site_url: str = "https://vartak.online"  # used in the prompt and for blog-post links in citations
     contact_email: str = ""  # where the bot sends visitors when it can't answer
 
-    # Call booking (Google Calendar). Booking is disabled until the three OAuth values are set.
+    # Call booking (Google Calendar). Off until either the Apps Script pair or the three OAuth values are set.
+    apps_script_url: str = ""  # web app URL of apps_script/Code.gs, ending in /exec
+    apps_script_secret: str = ""  # must match SECRET in the script
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_refresh_token: str = ""

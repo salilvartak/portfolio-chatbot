@@ -1,11 +1,19 @@
-"""Google Calendar + Gmail access for call booking, using the owner's OAuth refresh token.
+"""Google Calendar + email access for call booking.
 
 Booking requests become *pending* events on the owner's calendar (which blocks the slot). The owner
 approves or declines from an emailed review link; approving invites the visitor with a Meet link.
 All booking state lives on the event itself (extendedProperties), so no extra database is needed.
+
+Two ways to reach the owner's Google account (same booking logic on top):
+- Apps Script (recommended): a small script deployed as a web app in the owner's account
+  (see apps_script/Code.gs). No OAuth client, consent screen or expiring tokens.
+- OAuth: a refresh token for an OAuth client (needs the consent screen published).
 """
 
 import base64
+import json
+import logging
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -13,6 +21,8 @@ from email.message import EmailMessage
 from functools import lru_cache
 
 from app.config import get_settings
+
+log = logging.getLogger("chatbot")
 
 SOURCE = "portfolio-bot"
 SCOPES = [
@@ -33,8 +43,32 @@ class Booking:
     state: str  # "pending" | "confirmed"
 
 
-class GoogleCalendar:
-    def __init__(self, client_id: str, client_secret: str, refresh_token: str, calendar_id: str = "primary"):
+# ── transports: the handful of raw operations booking needs ───────────────────
+class AppsScriptTransport:
+    """Calls the owner's Apps Script web app (apps_script/Code.gs) with a shared secret."""
+
+    def __init__(self, url: str, secret: str, timeout: float = 25):
+        self.url, self.secret, self.timeout = url, secret, timeout
+
+    def __call__(self, op: str, **args):
+        data = json.dumps({"secret": self.secret, "op": op, "args": args}).encode()
+        req = urllib.request.Request(self.url, data=data, headers={"Content-Type": "application/json"})
+        # Apps Script answers POSTs with a redirect to the result; urllib follows it as a GET.
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            raw = resp.read().decode()
+        try:
+            out = json.loads(raw)
+        except ValueError:
+            raise RuntimeError(f"Apps Script returned non-JSON (is it deployed for 'Anyone'?): {raw[:200]}")
+        if "error" in out:
+            raise RuntimeError(f"Apps Script error on {op}: {out['error']}")
+        return out.get("result")
+
+
+class GoogleApiTransport:
+    """Calls Google's APIs directly with an OAuth refresh token."""
+
+    def __init__(self, client_id: str, client_secret: str, refresh_token: str, calendar_id: str):
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
@@ -46,48 +80,75 @@ class GoogleCalendar:
             token_uri="https://oauth2.googleapis.com/token",
             scopes=SCOPES,
         )
-        self.calendar_id = calendar_id
+        self.cal_id = calendar_id
         self._cal = build("calendar", "v3", credentials=creds, cache_discovery=False)
         self._gmail = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-    # ── reading ──────────────────────────────────────────────────────────────
+    def __call__(self, op: str, **a):
+        from googleapiclient.errors import HttpError
+
+        ev = self._cal.events()
+        if op == "freebusy":
+            return self._cal.freebusy().query(
+                body={"timeMin": a["timeMin"], "timeMax": a["timeMax"], "items": [{"id": self.cal_id}]}
+            ).execute()
+        if op == "list":
+            return ev.list(
+                calendarId=self.cal_id, timeMin=a["timeMin"], timeMax=a["timeMax"],
+                privateExtendedProperty=f"source={SOURCE}", singleEvents=True, maxResults=250,
+            ).execute()
+        if op == "get":
+            try:
+                return ev.get(calendarId=self.cal_id, eventId=a["eventId"]).execute()
+            except HttpError as err:
+                if err.resp.status in (404, 410):
+                    return None
+                raise
+        if op == "insert":
+            return ev.insert(calendarId=self.cal_id, sendUpdates=a["sendUpdates"], body=a["body"]).execute()
+        if op == "patch":
+            return ev.patch(
+                calendarId=self.cal_id, eventId=a["eventId"], sendUpdates=a["sendUpdates"],
+                conferenceDataVersion=a.get("conferenceDataVersion", 0), body=a["body"],
+            ).execute()
+        if op == "delete":
+            return ev.delete(calendarId=self.cal_id, eventId=a["eventId"], sendUpdates=a["sendUpdates"]).execute()
+        if op == "email":
+            msg = EmailMessage()
+            msg["To"], msg["Subject"] = a["to"], a["subject"]
+            msg.set_content(a["body"])
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            return self._gmail.users().messages().send(userId="me", body={"raw": raw}).execute()
+        raise ValueError(f"unknown op {op}")
+
+
+# ── booking operations ───────────────────────────────────────────────────────
+class GoogleCalendar:
+    def __init__(self, call, calendar_id: str = "primary"):
+        self._call = call
+        self.calendar_id = calendar_id
+
     def busy(self, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
-        resp = self._cal.freebusy().query(
-            body={"timeMin": start.isoformat(), "timeMax": end.isoformat(), "items": [{"id": self.calendar_id}]}
-        ).execute()
-        periods = resp["calendars"].get(self.calendar_id, {}).get("busy", [])
+        resp = self._call("freebusy", timeMin=start.isoformat(), timeMax=end.isoformat()) or {}
+        cals = resp.get("calendars", {})
+        periods = (cals.get(self.calendar_id) or next(iter(cals.values()), {})).get("busy", [])
         return [(_parse(p["start"]), _parse(p["end"])) for p in periods]
 
     def bookings(self, start: datetime, end: datetime, email: str | None = None) -> list[Booking]:
         """Calls booked through the site (pending or confirmed) in a time range."""
-        props = [f"source={SOURCE}"] + ([f"visitor_email={email.lower()}"] if email else [])
-        resp = self._cal.events().list(
-            calendarId=self.calendar_id,
-            timeMin=start.isoformat(),
-            timeMax=end.isoformat(),
-            privateExtendedProperty=props,
-            singleEvents=True,
-            maxResults=250,
-        ).execute()
-        return [b for e in resp.get("items", []) if e.get("status") != "cancelled" and (b := _booking(e))]
+        resp = self._call("list", timeMin=start.isoformat(), timeMax=end.isoformat()) or {}
+        out = [b for e in resp.get("items", []) if e.get("status") != "cancelled" and (b := _booking(e))]
+        return [b for b in out if b.email == email.lower()] if email else out
 
     def get(self, event_id: str) -> Booking | None:
-        from googleapiclient.errors import HttpError
+        e = self._call("get", eventId=event_id)
+        return _booking(e) if e and e.get("status") != "cancelled" else None
 
-        try:
-            e = self._cal.events().get(calendarId=self.calendar_id, eventId=event_id).execute()
-        except HttpError as err:
-            if err.resp.status in (404, 410):
-                return None
-            raise
-        return _booking(e) if e.get("status") != "cancelled" else None
-
-    # ── writing ──────────────────────────────────────────────────────────────
     def create_pending(self, start: datetime, end: datetime, name: str, email: str, topic: str, review_url_for) -> Booking:
         event_id = uuid.uuid4().hex  # hex is valid in Calendar's base32hex id alphabet
         review_url = review_url_for(event_id)
-        self._cal.events().insert(
-            calendarId=self.calendar_id,
+        self._call(
+            "insert",
             sendUpdates="none",
             body={
                 "id": event_id,
@@ -98,23 +159,15 @@ class GoogleCalendar:
                 "end": {"dateTime": end.isoformat()},
                 "status": "tentative",
                 "transparency": "opaque",
-                "extendedProperties": {
-                    "private": {
-                        "source": SOURCE,
-                        "state": "pending",
-                        "visitor_email": email.lower(),
-                        "visitor_name": name,
-                        "topic": topic[:500],
-                    }
-                },
+                "extendedProperties": {"private": _props(name, email, topic, "pending")},
             },
-        ).execute()
+        )
         return Booking(event_id, start, end, name, email.lower(), topic, "pending")
 
     def approve(self, event_id: str) -> None:
         b = self.get(event_id)
-        self._cal.events().patch(
-            calendarId=self.calendar_id,
+        self._call(
+            "patch",
             eventId=event_id,
             sendUpdates="all",
             conferenceDataVersion=1,
@@ -125,31 +178,20 @@ class GoogleCalendar:
                 "conferenceData": {
                     "createRequest": {"requestId": uuid.uuid4().hex, "conferenceSolutionKey": {"type": "hangoutsMeet"}}
                 },
-                "extendedProperties": {
-                    "private": {
-                        "source": SOURCE,
-                        "state": "confirmed",
-                        "visitor_email": b.email,
-                        "visitor_name": b.name,
-                        "topic": b.topic,
-                    }
-                },
+                "extendedProperties": {"private": _props(b.name, b.email, b.topic, "confirmed")},
             },
-        ).execute()
+        )
 
     def delete(self, event_id: str, notify: bool = False) -> None:
         """Remove a booking. notify=True sends the attendee a cancellation (for already-confirmed calls)."""
-        self._cal.events().delete(
-            calendarId=self.calendar_id, eventId=event_id, sendUpdates="all" if notify else "none"
-        ).execute()
+        self._call("delete", eventId=event_id, sendUpdates="all" if notify else "none")
 
     def send_email(self, to: str, subject: str, body: str) -> None:
-        msg = EmailMessage()
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg.set_content(body)
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        self._gmail.users().messages().send(userId="me", body={"raw": raw}).execute()
+        self._call("email", to=to, subject=subject, body=body)
+
+
+def _props(name: str, email: str, topic: str, state: str) -> dict:
+    return {"source": SOURCE, "state": state, "visitor_email": email.lower(), "visitor_name": name, "topic": topic[:500]}
 
 
 def _parse(s: str) -> datetime:
@@ -157,7 +199,7 @@ def _parse(s: str) -> datetime:
 
 
 def _booking(e: dict) -> Booking | None:
-    p = e.get("extendedProperties", {}).get("private", {})
+    p = (e.get("extendedProperties") or {}).get("private") or {}
     if p.get("source") != SOURCE or "dateTime" not in e.get("start", {}):
         return None
     return Booking(
@@ -174,25 +216,20 @@ def _booking(e: dict) -> Booking | None:
 @lru_cache
 def get_calendar() -> GoogleCalendar | None:
     """The owner's calendar, or None when booking isn't configured."""
-    import logging
-
-    log = logging.getLogger("chatbot")
     s = get_settings()
-    missing = [
-        name
-        for name, value in [
-            ("GOOGLE_OAUTH_CLIENT_ID", s.google_oauth_client_id),
-            ("GOOGLE_OAUTH_CLIENT_SECRET", s.google_oauth_client_secret),
-            ("GOOGLE_OAUTH_REFRESH_TOKEN", s.google_oauth_refresh_token),
-            ("ADMIN_TOKEN", s.admin_token),
-        ]
-        if not value.strip()
-    ]
-    if missing:
-        log.warning("call booking is OFF: missing %s", ", ".join(missing))
+    if not s.admin_token.strip():
+        log.warning("call booking is OFF: missing ADMIN_TOKEN")
         return None
-    log.info("call booking is ON (calendar=%s)", s.calendar_id)
-    return GoogleCalendar(s.google_oauth_client_id, s.google_oauth_client_secret, s.google_oauth_refresh_token, s.calendar_id)
+    if s.apps_script_url.strip() and s.apps_script_secret.strip():
+        log.info("call booking is ON (via Apps Script)")
+        return GoogleCalendar(AppsScriptTransport(s.apps_script_url.strip(), s.apps_script_secret.strip()))
+    oauth = [s.google_oauth_client_id, s.google_oauth_client_secret, s.google_oauth_refresh_token]
+    if all(v.strip() for v in oauth):
+        log.info("call booking is ON (via OAuth, calendar=%s)", s.calendar_id)
+        transport = GoogleApiTransport(*(v.strip() for v in oauth), s.calendar_id)
+        return GoogleCalendar(transport, s.calendar_id)
+    log.warning("call booking is OFF: set APPS_SCRIPT_URL + APPS_SCRIPT_SECRET (or the GOOGLE_OAUTH_* values)")
+    return None
 
 
 def window(now: datetime, days: int) -> tuple[datetime, datetime]:
