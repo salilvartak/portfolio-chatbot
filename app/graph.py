@@ -56,7 +56,6 @@ def default_graph():
     llm = ChatGoogleGenerativeAI(
         model=s.chat_model,
         google_api_key=s.google_api_key,
-        temperature=0.3,
         max_output_tokens=2048,
         reasoning_effort=s.thinking_level or None,
         # Fail fast: the defaults (6 retries, no timeout) can hold a visitor's request open for minutes.
