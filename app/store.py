@@ -18,6 +18,7 @@ class Chunk:
     source: str  # human-readable label, e.g. "Project: Clush"
     url: str = ""
     metadata: dict = field(default_factory=dict)
+    question: str = ""  # a follow-up question a visitor can click to ask about this chunk
 
 
 @lru_cache
@@ -43,7 +44,13 @@ def search(query_vector: list[float], k: int) -> list[Chunk]:
     for doc in q.get():
         d = doc.to_dict()
         results.append(
-            Chunk(id=doc.id, text=d["text"], source=d.get("source", ""), url=d.get("url", ""))
+            Chunk(
+                id=doc.id,
+                text=d["text"],
+                source=d.get("source", ""),
+                url=d.get("url", ""),
+                question=d.get("question", ""),
+            )
         )
     return results
 
@@ -61,7 +68,14 @@ def replace_chunks(chunks: list[Chunk], vectors: list[list[float]]) -> None:
     for i, (c, v) in enumerate(zip(chunks, vectors, strict=True)):
         batch.set(
             col.document(c.id),
-            {"text": c.text, "source": c.source, "url": c.url, "metadata": c.metadata, "embedding": Vector(v)},
+            {
+                "text": c.text,
+                "source": c.source,
+                "url": c.url,
+                "metadata": c.metadata,
+                "question": c.question,
+                "embedding": Vector(v),
+            },
         )
         if (i + 1) % 400 == 0:
             batch.commit()

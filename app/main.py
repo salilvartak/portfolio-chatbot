@@ -18,6 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
+from app.suggestions import pick_suggestions
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("chatbot")
@@ -110,6 +111,8 @@ async def chat(request: Request, body: ChatRequest):
                             seen.add(c.source)
                             sources.append({"label": c.source, "url": c.url})
                     yield _sse("sources", sources)
+                    asked = [m.content for m in msgs if m.role == "user"]
+                    yield _sse("suggestions", pick_suggestions(payload["retrieve"]["chunks"], asked))
                 elif mode == "messages":
                     chunk, meta = payload
                     if meta.get("langgraph_node") == "generate" and isinstance(chunk, AIMessageChunk):

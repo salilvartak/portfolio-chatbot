@@ -152,3 +152,31 @@ def test_busy_message_when_all_models_overloaded():
     finally:
         main._graph = None
     assert events[-1][0] == "error" and "a lot of requests" in events[-1][1]
+
+
+def test_pick_suggestions():
+    from app.suggestions import pick_suggestions
+
+    def ch(q):
+        return Chunk("x", "t", "s", question=q)
+
+    chunks = [
+        ch("Where does he work now?"),            # best match: just answered, skipped
+        ch("Is he open to new roles?"),
+        ch("How can I contact him?"),
+        ch("How can I contact or hire him?"),     # near-duplicate of the previous one
+        ch("What's his tech stack?"),            # already asked earlier in the chat
+        ch(""),
+        ch("What music does he like?"),
+        ch("Where did he study?"),
+    ]
+    asked = ["What is his tech stack?", "Where does Salil work?"]
+    assert pick_suggestions(chunks, asked) == [
+        "Is he open to new roles?", "How can I contact him?", "What music does he like?",
+    ]
+
+
+def test_chat_streams_suggestions(client):
+    c, _ = client
+    events = parse_sse(c.post("/chat", json={"messages": [{"role": "user", "content": "Hi"}]}).text)
+    assert ("suggestions", []) in events  # test chunks carry no questions

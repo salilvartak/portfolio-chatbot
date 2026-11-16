@@ -30,7 +30,10 @@ def project_chunks(projects: list[dict]) -> list[Chunk]:
             lines.append(f"Link ({link.get('label', '')}): {link.get('href', '')}")
         url = next((l.get("href", "") for l in p.get("links", []) if l.get("href")), "")
         for i, part in enumerate(split_text("\n".join(lines))):
-            chunks.append(Chunk(_id("project", title, str(i)), part, f"Project: {title}", url, {"type": "project"}))
+            chunks.append(
+                Chunk(_id("project", title, str(i)), part, f"Project: {title}", url, {"type": "project"},
+                      f"Tell me about {title}")
+            )
     return chunks
 
 
@@ -47,21 +50,40 @@ def blog_chunks(posts: list[dict], site_url: str = "") -> list[Chunk]:
             for part in split_text(section):
                 texts.append(f"{title}{' > ' + heading if heading else ''}\n{part}")
         for i, t in enumerate(texts):
-            chunks.append(Chunk(_id("blog", slug or title, str(i)), t, f"Blog: {title}", url, {"type": "blog"}))
+            chunks.append(
+                Chunk(_id("blog", slug or title, str(i)), t, f"Blog: {title}", url, {"type": "blog"},
+                      f'What did he write in "{title}"?')
+            )
     return chunks
 
 
+ASK_RE = re.compile(r"<!--\s*ask:\s*(.*?)\s*-->", re.I | re.S)
+
+
+def section_question(heading: str, section: str) -> str:
+    """The follow-up question for a section: an explicit <!-- ask: ... --> note, else the heading."""
+    if m := ASK_RE.search(section):
+        return m.group(1).strip()
+    if heading.endswith("?"):
+        return heading
+    return f"Tell me about {heading[0].lower() + heading[1:]}" if heading else ""
+
+
 def markdown_chunks(path: Path) -> list[Chunk]:
-    text = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.S)  # drop author notes
-    h1 = re.search(r"^#\s+(.+)$", text, flags=re.M)
+    raw = path.read_text(encoding="utf-8")
+    h1 = re.search(r"^#\s+(.+)$", raw, flags=re.M)
     doc_title = h1.group(1).strip() if h1 else path.stem.replace("-", " ").replace("_", " ").title()
     chunks = []
-    for heading, section in split_markdown(text):
+    for heading, section in split_markdown(raw):
         if heading == doc_title:
             heading = ""
+        question = section_question(heading, section)
+        section = re.sub(r"<!--.*?-->", "", section, flags=re.S).strip()  # drop author notes
         label = f"{doc_title}: {heading}" if heading else doc_title
         for i, part in enumerate(split_text(section)):
-            chunks.append(Chunk(_id("doc", path.name, heading, str(i)), f"{label}\n{part}", label, "", {"type": "doc"}))
+            chunks.append(
+                Chunk(_id("doc", path.name, heading, str(i)), f"{label}\n{part}", label, "", {"type": "doc"}, question)
+            )
     return chunks
 
 
