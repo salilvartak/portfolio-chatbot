@@ -54,6 +54,12 @@ def default_graph():
 
     s = get_settings()
     llm = ChatGoogleGenerativeAI(
-        model=s.chat_model, google_api_key=s.google_api_key, temperature=0.3, max_output_tokens=2048
+        model=s.chat_model,
+        google_api_key=s.google_api_key,
+        temperature=0.3,
+        max_output_tokens=2048,
+        # Fail fast: the defaults (6 retries, no timeout) can hold a visitor's request open for minutes.
+        max_retries=1,
+        timeout=45,
     )
     return build_graph(llm, lambda q: search(embed_query(q), s.top_k), s.owner_name, s.site_url, s.contact_email)
