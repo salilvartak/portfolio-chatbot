@@ -58,6 +58,7 @@ def default_graph():
         google_api_key=s.google_api_key,
         temperature=0.3,
         max_output_tokens=2048,
+        reasoning_effort=s.thinking_level or None,
         # Fail fast: the defaults (6 retries, no timeout) can hold a visitor's request open for minutes.
         max_retries=1,
         timeout=45,

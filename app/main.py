@@ -66,13 +66,6 @@ def _sse(event: str, data) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def _text(content) -> str:
-    # Gemini may return content as a list of parts.
-    if isinstance(content, str):
-        return content
-    return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
-
-
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -120,7 +113,7 @@ async def chat(request: Request, body: ChatRequest):
                 elif mode == "messages":
                     chunk, meta = payload
                     if meta.get("langgraph_node") == "generate" and isinstance(chunk, AIMessageChunk):
-                        if text := _text(chunk.content):
+                        if text := chunk.text:  # text blocks only, never internal reasoning
                             if first_token is None:
                                 first_token = time.monotonic() - t0
                                 log.info("chat first token after %.1fs", first_token)

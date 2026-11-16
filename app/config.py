@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # Gemini
     google_api_key: str = ""
     chat_model: str = "gemini-3.8-flash"
+    # How much the model reasons before answering (minimal/low/medium/high). Higher is slower and can
+    # use up the output budget before any answer text is written.
+    thinking_level: str = "low"
     embedding_model: str = "gemini-embedding-001"
     # Firestore vector indexes support at most 2048 dims; 768 is plenty here.
     embedding_dim: int = 768
