@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # Gemini
     google_api_key: str = ""
-    chat_model: str = "gemini-2.5-flash"
+    chat_model: str = "gemini-3.8-flash"
     embedding_model: str = "gemini-embedding-001"
     # Firestore vector indexes support at most 2048 dims; 768 is plenty here.
     embedding_dim: int = 768

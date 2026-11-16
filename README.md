@@ -4,7 +4,7 @@ A RAG chatbot that answers visitors' questions about Salil, for the portfolio si
 
 - **FastAPI** server, streaming answers over Server-Sent Events
 - **LangGraph** agent (`retrieve → generate`), structured so a calendar-booking branch can be added later
-- **Gemini** for chat (`gemini-2.5-flash`) and embeddings (`gemini-embedding-001`, 768 dims)
+- **Gemini** for chat (`gemini-3.8-flash`) and embeddings (`gemini-embedding-001`, 768 dims)
 - **Firestore vector search**, in the same Firebase project the portfolio already uses
 
 ## How it works
