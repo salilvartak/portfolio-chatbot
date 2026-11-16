@@ -121,3 +121,34 @@ def test_reindex_requires_token(client, monkeypatch):
     monkeypatch.setattr(ingest.run, "reindex", lambda: 23)
     r = c.post("/admin/reindex", headers={"Authorization": "Bearer secret"})
     assert r.status_code == 200 and r.json() == {"chunks": 23}
+
+
+class _Overloaded(GenericFakeChatModel):
+    def _stream(self, *a, **k):
+        raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+
+    def _generate(self, *a, **k):
+        raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+
+
+def test_falls_back_when_main_model_overloaded():
+    from app.graph import with_fallbacks
+
+    primary = _Overloaded(messages=iter([]))
+    backup = GenericFakeChatModel(messages=iter([AIMessage("Salil works at Vharta.ai.")]))
+    main._graph = build_graph(with_fallbacks([primary, backup]), lambda q: CHUNKS, "Salil")
+    try:
+        events = parse_sse(TestClient(main.app).post("/chat", json={"messages": [{"role": "user", "content": "Where?"}]}).text)
+    finally:
+        main._graph = None
+    assert "".join(d for e, d in events if e == "token") == "Salil works at Vharta.ai."
+    assert events[-1] == ("done", None)
+
+
+def test_busy_message_when_all_models_overloaded():
+    main._graph = build_graph(_Overloaded(messages=iter([])), lambda q: CHUNKS, "Salil")
+    try:
+        events = parse_sse(TestClient(main.app).post("/chat", json={"messages": [{"role": "user", "content": "Where?"}]}).text)
+    finally:
+        main._graph = None
+    assert events[-1][0] == "error" and "a lot of requests" in events[-1][1]

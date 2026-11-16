@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     # Gemini
     google_api_key: str = ""
     chat_model: str = "gemini-3.8-flash"
+    # Comma-separated models to try, in order, when the main one fails (e.g. 503 "high demand").
+    fallback_models: str = ""
     # How much the model reasons before answering (minimal/low/medium/high). Higher is slower and can
     # use up the output budget before any answer text is written.
     thinking_level: str = "low"

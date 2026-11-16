@@ -3,8 +3,8 @@
 from collections.abc import Callable
 from typing import Annotated, TypedDict
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -26,7 +26,7 @@ def _retrieval_query(messages: list[AnyMessage]) -> str:
     return "\n".join(str(t) for t in user_turns[-2:])
 
 
-def build_graph(llm: BaseChatModel, retriever: Retriever, owner: str, site: str = "", contact: str = ""):
+def build_graph(llm: Runnable, retriever: Retriever, owner: str, site: str = "", contact: str = ""):
     contact = contact or "the contact links on the website"
     def retrieve(state: State) -> dict:
         return {"chunks": retriever(_retrieval_query(state["messages"]))}
@@ -53,13 +53,29 @@ def default_graph():
     from app.store import search
 
     s = get_settings()
-    llm = ChatGoogleGenerativeAI(
-        model=s.chat_model,
-        google_api_key=s.google_api_key,
-        max_output_tokens=2048,
-        reasoning_effort=s.thinking_level or None,
-        # Fail fast: the defaults (6 retries, no timeout) can hold a visitor's request open for minutes.
-        max_retries=1,
-        timeout=45,
+
+    def make(model: str) -> ChatGoogleGenerativeAI:
+        return ChatGoogleGenerativeAI(
+            model=model,
+            google_api_key=s.google_api_key,
+            max_output_tokens=2048,
+            reasoning_effort=s.thinking_level or None,
+            # Fail fast so a fallback model gets a turn: the defaults (6 retries, no timeout)
+            # can hold a visitor's request open for minutes.
+            max_retries=1,
+            timeout=30,
+        )
+
+    names = [s.chat_model, *(m.strip() for m in s.fallback_models.split(",") if m.strip())]
+    return build_graph(
+        with_fallbacks([make(n) for n in dict.fromkeys(names)]),
+        lambda q: search(embed_query(q), s.top_k),
+        s.owner_name,
+        s.site_url,
+        s.contact_email,
     )
-    return build_graph(llm, lambda q: search(embed_query(q), s.top_k), s.owner_name, s.site_url, s.contact_email)
+
+
+def with_fallbacks(models: list[Runnable]) -> Runnable:
+    """Try each model in order; move on when one raises (overloaded, timed out, unavailable)."""
+    return models[0] if len(models) == 1 else models[0].with_fallbacks(models[1:])

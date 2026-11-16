@@ -126,8 +126,16 @@ async def chat(request: Request, body: ChatRequest):
         except (asyncio.CancelledError, GeneratorExit):
             log.warning("chat cancelled after %.1fs (client disconnected)", time.monotonic() - t0)
             raise
-        except Exception:
+        except Exception as e:
             log.exception("chat failed after %.1fs", time.monotonic() - t0)
-            yield _sse("error", "Sorry, something went wrong. Please try again.")
+            busy = any(k in str(e) for k in ("503", "UNAVAILABLE", "high demand", "429", "RESOURCE_EXHAUSTED")) or (
+                "timeout" in type(e).__name__.lower()
+            )
+            yield _sse(
+                "error",
+                "The AI is getting a lot of requests right now. Please try again in a minute."
+                if busy
+                else "Sorry, something went wrong. Please try again.",
+            )
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
