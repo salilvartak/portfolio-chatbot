@@ -63,10 +63,16 @@ def test_daily_cap_and_horizon_and_part_of_day():
     assert night and all(s.hour < 12 for s in night)
 
 
-def test_spread_covers_several_days():
-    slots = open_slots(RULES, NOW, [])
-    picked = spread(slots, 8)
-    assert len(picked) == 8 and len({s.date() for s in picked}) >= 5 and picked == sorted(picked)
+def test_spread_gives_varied_times():
+    picked = spread(open_slots(RULES, NOW, []))
+    by_day = {}
+    for s in picked:
+        by_day.setdefault(s.date(), []).append(s.strftime("%H:%M"))
+    assert by_day[date(2026, 11, 16)] == ["20:00", "22:00", "23:30"]  # Mon after the 12 h notice
+    assert by_day[date(2026, 11, 17)] == ["19:00", "21:00", "23:30"]
+    assert len(by_day) == 3 and picked == sorted(picked)
+    sat = spread(open_slots(RULES, NOW, [], start_day=date(2026, 11, 21), end_day=date(2026, 11, 21)))
+    assert [s.strftime("%H:%M") for s in sat] == ["10:00", "19:00", "23:30"]  # both weekend windows
 
 
 # ── fake calendar ────────────────────────────────────────────────────────────
@@ -124,7 +130,7 @@ def test_find_slots_counts_pending_bookings_toward_daily_cap():
     cal = FakeCalendar()
     for i, h in enumerate((20, 21, 22)):
         request_booking(cal, RULES, NOW, ist(17, h, 0), f"P{i}", f"p{i}@x.dev", "", lambda e: "")
-    assert all(s.date() != date(2026, 11, 17) for s in find_slots(cal, RULES, NOW, limit=50))
+    assert all(s.date() != date(2026, 11, 17) for s in find_slots(cal, RULES, NOW, days=20, per_day=20))
 
 
 def test_signed_links():

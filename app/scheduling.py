@@ -94,16 +94,18 @@ def open_slots(
     return out
 
 
-def spread(slots: list[datetime], limit: int = 8) -> list[datetime]:
-    """Pick up to `limit` slots spread across days, so visitors see options on several days."""
+def spread(slots: list[datetime], days: int = 3, per_day: int = 3) -> list[datetime]:
+    """A short, varied menu: the first `days` days with openings, and on each up to `per_day` times spread
+    across the day (e.g. 7:00, 9:00 and 11:00 PM) rather than the earliest few in a row."""
     by_day: dict[date, list[datetime]] = {}
-    for s in slots:
+    for s in sorted(slots):
         by_day.setdefault(s.date(), []).append(s)
     picked: list[datetime] = []
-    rnd = 0
-    while len(picked) < limit and any(len(v) > rnd for v in by_day.values()):
-        for day_slots in by_day.values():
-            if rnd < len(day_slots) and len(picked) < limit:
-                picked.append(day_slots[rnd])
-        rnd += 1
-    return sorted(picked)
+    for day_slots in list(by_day.values())[:days]:
+        n = len(day_slots)
+        if n <= per_day:
+            picked += day_slots
+        else:
+            idx = sorted({round(i * (n - 1) / (per_day - 1)) for i in range(per_day)}) if per_day > 1 else [0]
+            picked += [day_slots[i] for i in idx]
+    return picked

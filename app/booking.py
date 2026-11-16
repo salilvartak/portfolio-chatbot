@@ -53,11 +53,12 @@ def find_slots(
     start_day: date | None = None,
     end_day: date | None = None,
     part_of_day: str = "any",
-    limit: int = 8,
+    days: int = 3,
+    per_day: int = 3,
 ) -> list[datetime]:
-    busy, per_day = _calendar_state(cal, rules, now)
-    slots = open_slots(rules, now, busy, per_day, start_day, end_day, part_of_day)
-    return spread(slots, limit)
+    busy, per_day_count = _calendar_state(cal, rules, now)
+    slots = open_slots(rules, now, busy, per_day_count, start_day, end_day, part_of_day)
+    return spread(slots, days, per_day)
 
 
 def request_booking(
