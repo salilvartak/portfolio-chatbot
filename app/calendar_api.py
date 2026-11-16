@@ -174,9 +174,24 @@ def _booking(e: dict) -> Booking | None:
 @lru_cache
 def get_calendar() -> GoogleCalendar | None:
     """The owner's calendar, or None when booking isn't configured."""
+    import logging
+
+    log = logging.getLogger("chatbot")
     s = get_settings()
-    if not (s.google_oauth_client_id and s.google_oauth_client_secret and s.google_oauth_refresh_token):
+    missing = [
+        name
+        for name, value in [
+            ("GOOGLE_OAUTH_CLIENT_ID", s.google_oauth_client_id),
+            ("GOOGLE_OAUTH_CLIENT_SECRET", s.google_oauth_client_secret),
+            ("GOOGLE_OAUTH_REFRESH_TOKEN", s.google_oauth_refresh_token),
+            ("ADMIN_TOKEN", s.admin_token),
+        ]
+        if not value.strip()
+    ]
+    if missing:
+        log.warning("call booking is OFF: missing %s", ", ".join(missing))
         return None
+    log.info("call booking is ON (calendar=%s)", s.calendar_id)
     return GoogleCalendar(s.google_oauth_client_id, s.google_oauth_client_secret, s.google_oauth_refresh_token, s.calendar_id)
 
 

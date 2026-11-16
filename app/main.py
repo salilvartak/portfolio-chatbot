@@ -73,7 +73,7 @@ def _sse(event: str, data) -> str:
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "booking": get_calendar() is not None}
 
 
 @app.post("/admin/reindex")
