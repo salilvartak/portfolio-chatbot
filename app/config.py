@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     rate_limit: str = "20/minute"
     max_message_chars: int = 1000
     max_history_messages: int = 10
+    admin_token: str = ""  # protects POST /admin/reindex; the endpoint is disabled when empty
 
     # Who the bot is speaking for
     owner_name: str = "Salil Vartak"

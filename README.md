@@ -17,33 +17,40 @@ Firestore blog/list ─┘                                          │
 visitor question ─► /chat ─► LangGraph: retrieve (vector search) ─► generate (Gemini) ─► streamed answer + sources
 ```
 
-## Setup
+## Deploy (Render)
 
-1. **Python env**
-   ```bash
-   python -m venv .venv && source .venv/bin/activate
-   pip install -r requirements-dev.txt
-   cp .env.example .env   # then fill it in
-   ```
-2. **Keys**
-   - Gemini API key from https://aistudio.google.com/apikey
-   - Firebase Admin service account: Firebase Console → Project settings → Service accounts → *Generate new private key*. Put the JSON on one line in `FIREBASE_SERVICE_ACCOUNT_JSON`. Never commit it.
-3. **Create the vector index** (one time):
+1. **Keys**
+   - Gemini API key: https://aistudio.google.com/apikey
+   - Firebase service account: Firebase Console → Project settings → Service accounts → *Generate new private key*.
+     Paste the JSON as one line into `FIREBASE_SERVICE_ACCOUNT_JSON`. Never commit it.
+2. **Create the vector index** (one time). Open [Google Cloud Shell](https://shell.cloud.google.com)
+   (gcloud is preinstalled, so nothing to install locally) and run:
    ```bash
    gcloud firestore indexes composite create --project=YOUR_PROJECT_ID \
      --collection-group=rag_chunks --query-scope=COLLECTION \
      --field-config=field-path=embedding,vector-config='{"dimension":"768","flat":"{}"}'
    ```
-4. **Add your knowledge doc** to `content/` (see `content/README.md`), then build the index:
+3. **Render:** New → Blueprint → pick this repo. Fill in `GOOGLE_API_KEY`, `FIREBASE_SERVICE_ACCOUNT_JSON`,
+   `FIREBASE_PROJECT_ID`, `CONTACT_EMAIL` and `ALLOWED_ORIGINS` (e.g. `https://vartak.online,https://www.vartak.online`).
+   `ADMIN_TOKEN` is generated for you.
+4. Every deploy re-indexes `content/` plus your Firestore projects and blog posts (it's part of the build command),
+   so editing `content/` and pushing is all it takes to update the bot.
+5. After changing projects or blog posts in Firebase without a deploy, re-index on demand:
    ```bash
-   python -m ingest.run --dry-run   # inspect chunks
-   python -m ingest.run             # embed + write to Firestore
+   curl -X POST https://YOUR-SERVICE.onrender.com/admin/reindex -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
    ```
-   Re-run this whenever your doc, projects or blog posts change.
-5. **Run locally**
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
+
+The free plan sleeps when idle, so the first request after a quiet spell takes a while to start.
+
+## Run locally (optional)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env              # fill it in
+python -m ingest.run --dry-run    # inspect chunks; drop --dry-run to embed + write
+uvicorn app.main:app --reload --port 8000
+```
 
 ## API
 
@@ -58,12 +65,6 @@ Send the recent conversation (the server keeps the last 10 messages). The respon
 | `error`   | message string                          |
 
 `GET /health` returns `{"ok": true}`.
-
-## Deploy (Render)
-
-New → Blueprint → pick this repo; `render.yaml` sets everything up. Fill in the secret env vars in the
-dashboard, and set `ALLOWED_ORIGINS` to your portfolio domain(s).
-The free plan sleeps when idle, so the first request after a quiet spell takes a while to start.
 
 ## Safety
 

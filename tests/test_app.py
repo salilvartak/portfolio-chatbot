@@ -109,3 +109,15 @@ def test_prompt_includes_contact_and_site():
 
     out = SYSTEM_PROMPT.format(owner="Salil", site="https://vartak.online", contact="me@x.dev", context="c")
     assert "me@x.dev" in out and "https://vartak.online" in out
+
+
+def test_reindex_requires_token(client, monkeypatch):
+    c, _ = client
+    monkeypatch.setattr(main.settings, "admin_token", "")
+    assert c.post("/admin/reindex", headers={"Authorization": "Bearer x"}).status_code == 401
+    monkeypatch.setattr(main.settings, "admin_token", "secret")
+    assert c.post("/admin/reindex", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    import ingest.run
+    monkeypatch.setattr(ingest.run, "reindex", lambda: 23)
+    r = c.post("/admin/reindex", headers={"Authorization": "Bearer secret"})
+    assert r.status_code == 200 and r.json() == {"chunks": 23}

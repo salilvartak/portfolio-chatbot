@@ -2,9 +2,11 @@
 
 import json
 import logging
+import secrets
 from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
@@ -71,6 +73,18 @@ def _text(content) -> str:
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/admin/reindex")
+@limiter.limit("5/hour")
+async def reindex(request: Request, authorization: str = Header(default="")):
+    """Re-embed all content. Call after editing projects or blog posts in Firestore."""
+    token = settings.admin_token
+    if not token or not secrets.compare_digest(authorization, f"Bearer {token}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    from ingest.run import reindex as run_reindex
+
+    return {"chunks": await run_in_threadpool(run_reindex)}
 
 
 @app.post("/chat")
