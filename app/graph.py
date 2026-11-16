@@ -26,12 +26,13 @@ def _retrieval_query(messages: list[AnyMessage]) -> str:
     return "\n".join(str(t) for t in user_turns[-2:])
 
 
-def build_graph(llm: BaseChatModel, retriever: Retriever, owner: str):
+def build_graph(llm: BaseChatModel, retriever: Retriever, owner: str, site: str = "", contact: str = ""):
+    contact = contact or "the contact links on the website"
     def retrieve(state: State) -> dict:
         return {"chunks": retriever(_retrieval_query(state["messages"]))}
 
     def generate(state: State) -> dict:
-        system = SystemMessage(SYSTEM_PROMPT.format(owner=owner, context=format_context(state["chunks"])))
+        system = SystemMessage(SYSTEM_PROMPT.format(owner=owner, site=site or "this site", contact=contact, context=format_context(state["chunks"])))
         reply = llm.invoke([system, *state["messages"]])
         return {"messages": [reply]}
 
@@ -55,4 +56,4 @@ def default_graph():
     llm = ChatGoogleGenerativeAI(
         model=s.chat_model, google_api_key=s.google_api_key, temperature=0.3, max_output_tokens=800
     )
-    return build_graph(llm, lambda q: search(embed_query(q), s.top_k), s.owner_name)
+    return build_graph(llm, lambda q: search(embed_query(q), s.top_k), s.owner_name, s.site_url, s.contact_email)

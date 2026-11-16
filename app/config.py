@@ -30,7 +30,8 @@ class Settings(BaseSettings):
 
     # Who the bot is speaking for
     owner_name: str = "Salil Vartak"
-    site_url: str = ""  # used to build links to blog posts in citations
+    site_url: str = "https://vartak.online"  # used in the prompt and for blog-post links in citations
+    contact_email: str = ""  # where the bot sends visitors when it can't answer
 
     @property
     def origins(self) -> list[str]:

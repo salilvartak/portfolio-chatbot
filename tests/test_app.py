@@ -27,7 +27,7 @@ def client():
         return CHUNKS
 
     llm = GenericFakeChatModel(messages=iter([AIMessage("Salil built Clush with Flutter.")]))
-    main._graph = build_graph(llm, retriever, "Salil")
+    main._graph = build_graph(llm, retriever, "Salil", "https://vartak.online", "me@x.dev")
     yield TestClient(main.app), seen
     main._graph = None
 
@@ -92,3 +92,20 @@ def test_project_and_blog_chunks():
     b = blog_chunks([{"title": "T", "slug": "t", "excerpt": "e", "body": "# H\nbody"}], "https://site.dev/")
     assert [c.url for c in b] == ["https://site.dev/blog/t"] * 2
     assert len({c.id for c in b}) == 2
+
+
+def test_content_files_chunk_cleanly():
+    from ingest.sources import CONTENT_DIR, markdown_chunks
+
+    chunks = [c for p in sorted(CONTENT_DIR.glob("*.md")) if p.name != "README.md" for c in markdown_chunks(p)]
+    labels = {c.source for c in chunks}
+    assert "Work Experience: Full Stack Developer at Vharta.ai (October 2026 – present, current job)" in labels
+    assert len({c.id for c in chunks}) == len(chunks)
+    assert all("<!--" not in c.text and len(c.text) <= 1500 + 200 for c in chunks)
+
+
+def test_prompt_includes_contact_and_site():
+    from app.prompts import SYSTEM_PROMPT
+
+    out = SYSTEM_PROMPT.format(owner="Salil", site="https://vartak.online", contact="me@x.dev", context="c")
+    assert "me@x.dev" in out and "https://vartak.online" in out

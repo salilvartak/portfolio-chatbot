@@ -1,6 +1,7 @@
 """Load knowledge from the portfolio's Firestore data and from markdown files in content/."""
 
 import hashlib
+import re
 from pathlib import Path
 
 from app.store import Chunk, get_db
@@ -51,9 +52,13 @@ def blog_chunks(posts: list[dict], site_url: str = "") -> list[Chunk]:
 
 
 def markdown_chunks(path: Path) -> list[Chunk]:
-    doc_title = path.stem.replace("-", " ").replace("_", " ").title()
+    text = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.S)  # drop author notes
+    h1 = re.search(r"^#\s+(.+)$", text, flags=re.M)
+    doc_title = h1.group(1).strip() if h1 else path.stem.replace("-", " ").replace("_", " ").title()
     chunks = []
-    for heading, section in split_markdown(path.read_text(encoding="utf-8")):
+    for heading, section in split_markdown(text):
+        if heading == doc_title:
+            heading = ""
         label = f"{doc_title}: {heading}" if heading else doc_title
         for i, part in enumerate(split_text(section)):
             chunks.append(Chunk(_id("doc", path.name, heading, str(i)), f"{label}\n{part}", label, "", {"type": "doc"}))
