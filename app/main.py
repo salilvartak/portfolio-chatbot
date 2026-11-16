@@ -1,8 +1,10 @@
 """FastAPI app. POST /chat streams the answer as Server-Sent Events."""
 
+import asyncio
 import json
 import logging
 import secrets
+import time
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -17,6 +19,7 @@ from slowapi.util import get_remote_address
 
 from app.config import get_settings
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("chatbot")
 settings = get_settings()
 
@@ -97,12 +100,17 @@ async def chat(request: Request, body: ChatRequest):
     history = [HumanMessage(m.content) if m.role == "user" else AIMessage(m.content) for m in msgs[:-1]]
 
     async def stream():
+        t0 = time.monotonic()
+        first_token = None
+        n_tokens = 0
+        log.info("chat start: model=%s question=%r", settings.chat_model, last[:80])
         try:
             async for mode, payload in get_graph().astream(
                 {"messages": [*history, HumanMessage(last)], "chunks": []},
                 stream_mode=["updates", "messages"],
             ):
                 if mode == "updates" and "retrieve" in payload:
+                    log.info("chat retrieved %d chunks in %.1fs", len(payload["retrieve"]["chunks"]), time.monotonic() - t0)
                     seen, sources = set(), []
                     for c in payload["retrieve"]["chunks"]:
                         if c.source not in seen:
@@ -113,10 +121,20 @@ async def chat(request: Request, body: ChatRequest):
                     chunk, meta = payload
                     if meta.get("langgraph_node") == "generate" and isinstance(chunk, AIMessageChunk):
                         if text := _text(chunk.content):
+                            if first_token is None:
+                                first_token = time.monotonic() - t0
+                                log.info("chat first token after %.1fs", first_token)
+                            n_tokens += 1
                             yield _sse("token", text)
+            if n_tokens == 0:
+                log.warning("chat produced no answer text (model=%s)", settings.chat_model)
+            log.info("chat done in %.1fs, %d token chunks", time.monotonic() - t0, n_tokens)
             yield _sse("done", None)
+        except (asyncio.CancelledError, GeneratorExit):
+            log.warning("chat cancelled after %.1fs (client disconnected)", time.monotonic() - t0)
+            raise
         except Exception:
-            log.exception("chat failed")
+            log.exception("chat failed after %.1fs", time.monotonic() - t0)
             yield _sse("error", "Sorry, something went wrong. Please try again.")
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
