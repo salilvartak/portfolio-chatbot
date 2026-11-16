@@ -12,5 +12,8 @@ Yes: LLM fine-tuning (+18% accuracy over the base model), a LangGraph invoice-ex
 ## Does he do mobile development?
 Yes: Flutter in production (an app with 300+ users) and several personal Flutter apps.
 
+## Is he open to new roles? Would he relocate?
+He's open to Full Stack Developer roles anywhere in India. He's based in Pune. For specifics like availability or notice period, email him directly.
+
 ## How can I contact or hire him?
 Email Salilv1103@gmail.com, connect on LinkedIn (https://www.linkedin.com/in/salil-vartak-144977198), or visit https://vartak.online. His code is on GitHub at https://github.com/salilvartak.
